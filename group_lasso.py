@@ -123,14 +123,14 @@ def group_lasso(X, y, alpha, groups, max_iter=MAX_ITER, rtol=1e-6,
 
 
 def soft_threshold(a, b):
-    tmp = np.sign(a) * (np.abs(a) - b)
+    tmp = (np.abs(a) - b)
     tmp[tmp < 0] = 0.
-    return tmp
+    return np.sign(a) * tmp
 
 def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
                 verbose=False):
     """
-    .5 * |Xb - y| + n_samples * alpha * (1 - rho) * sum(sqrt(#j) * ||b_j||_2) + alpha * rho ||b_j||_1
+    .5 * ||Xb - y||^2_2 + n_samples * (alpha * (1 - rho) * sum(sqrt(#j) * ||b_j||_2) + alpha * rho ||b_j||_1)
     """
     # .. local variables ..
     X, y, groups, alpha = map(np.asanyarray, (X, y, groups, alpha))
@@ -138,6 +138,8 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
         raise ValueError("Incorrect shape for groups")
     w_new = np.zeros(X.shape[1], dtype=X.dtype)
     alpha = alpha * X.shape[0]
+    rho = rho * X.shape[0]
+    n_samples = X.shape[0]
 
     # .. use integer indices for groups ..
     group_labels = [np.where(groups == i)[0] for i in np.unique(groups)]
@@ -148,17 +150,20 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
         for i, g in enumerate(group_labels):
             w_i = w_new.copy()
             w_i[g] = 0.
-            X_residual = np.dot(X[:, g].T, np.dot(X, w_i)) - Xy[g]
+            X_residual = Xy[g] - np.dot(X[:, g].T, np.dot(X, w_i))
             s = soft_threshold(X_residual, alpha * rho)
             # .. step 2 ..
-            if np.linalg.norm(s) <= (1 - alpha) * rho:
+            if False: #np.linalg.norm(s) <= (1 - rho) * alpha:
                 w_new[g] = 0.
-            # .. step 3 ..
-            for _ in range(10):
-                step = 1.
-                tmp = soft_threshold(w_new[g] - step * X_residual, step * alpha * rho)
-                w_new[g] = max(1 - step * (1 - alpha) * rho / np.linalg.norm(tmp), 0) \
-                    * tmp
+            else:
+                # .. step 3 ..
+                for _ in range(10):
+                    step = 1.
+                    tmp = soft_threshold(w_new[g] + step * X_residual, step * alpha * rho)
+                    w_new[g] = max(1 - step * (1 - rho) * alpha / np.linalg.norm(tmp), 0) \
+                        * tmp
+                    print w_new[g]
+            #import ipdb; ipdb.set_trace()
     return w_new
 
 
