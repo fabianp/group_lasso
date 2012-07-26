@@ -1,0 +1,1 @@
+Some experiments with the coordinate descent algorithm used in the (Sparse) Group Lasso model

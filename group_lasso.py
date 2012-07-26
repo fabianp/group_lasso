@@ -138,13 +138,13 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
         raise ValueError("Incorrect shape for groups")
     w_new = np.zeros(X.shape[1], dtype=X.dtype)
     alpha = alpha * X.shape[0]
-    rho = rho * X.shape[0]
     n_samples = X.shape[0]
 
     # .. use integer indices for groups ..
     group_labels = [np.where(groups == i)[0] for i in np.unique(groups)]
     Xy = np.dot(X.T, y)
 
+#    import ipdb; ipdb.set_trace()
     for n_iter in range(max_iter):
         w_old = w_new.copy()
         for i, g in enumerate(group_labels):
@@ -153,17 +153,16 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
             X_residual = Xy[g] - np.dot(X[:, g].T, np.dot(X, w_i))
             s = soft_threshold(X_residual, alpha * rho)
             # .. step 2 ..
-            if False: #np.linalg.norm(s) <= (1 - rho) * alpha:
+            if np.linalg.norm(s) <= (1 - rho) * alpha:
                 w_new[g] = 0.
             else:
+#                w_new[g] = soft_threshold(X_residual, alpha)
                 # .. step 3 ..
                 for _ in range(10):
                     step = 1.
                     tmp = soft_threshold(w_new[g] + step * X_residual, step * alpha * rho)
-                    w_new[g] = max(1 - step * (1 - rho) * alpha / np.linalg.norm(tmp), 0) \
-                        * tmp
-                    print w_new[g]
-            #import ipdb; ipdb.set_trace()
+                    w_new[g] = max(1 - step * (1 - rho) * alpha / np.linalg.norm(tmp), 0) * tmp
+                print w_new[g]
     return w_new
 
 
@@ -194,7 +193,8 @@ if __name__ == '__main__':
     X = diabetes.data
     y = diabetes.target
     alpha = .1
-    groups = np.r_[[0, 0], np.arange(X.shape[1] - 2)]
+    # groups = np.r_[[0, 0], np.arange(X.shape[1] - 2)]
+    groups = np.arange(X.shape[1])
     coefs = sparse_group_lasso(X, y, alpha, 0, groups, verbose=True)
     print 'KKT conditions verified:', check_kkt(X, y, coefs, alpha, groups)
 
