@@ -123,9 +123,8 @@ def group_lasso(X, y, alpha, groups, max_iter=MAX_ITER, rtol=1e-6,
 
 
 def soft_threshold(a, b):
-    tmp = (np.abs(a) - b)
-    tmp[tmp < 0] = 0.
-    return np.sign(a) * tmp
+    """accepts vectors"""
+    return np.sign(a) * np.fmax(np.abs(a) - b, 0)
 
 def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
                 verbose=False):
