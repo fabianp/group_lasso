@@ -5,7 +5,7 @@ MAX_ITER = 100
 
 
 def group_lasso(X, y, alpha, groups, max_iter=MAX_ITER, rtol=1e-6,
-             verbose=False):
+             verbose=False, newton_maxiter=10 ** 4):
     """
     Linear least-squares with l2/l1 regularization solver.
 
@@ -89,7 +89,7 @@ def group_lasso(X, y, alpha, groups, max_iter=MAX_ITER, rtol=1e-6,
             else:
                 if alpha < linalg.norm(X_residual, 2):
                     initial_guess[i] = optimize.newton(f, initial_guess[i], df, tol=1e-3,
-                                args=(qp ** 2, eigvals, alpha), maxiter=10 ** 5)
+                                args=(qp ** 2, eigvals, alpha), maxiter=newton_maxiter)
                     w_new[g] = - initial_guess[i] * np.dot(eigvects /  (eigvals * initial_guess[i] + alpha), qp)
                 else:
                     w_new[g] = 0.
