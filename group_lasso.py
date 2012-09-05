@@ -81,15 +81,15 @@ def group_lasso(X, y, alpha, groups, max_iter=MAX_ITER, rtol=1e-6,
             if H is not None:
                 X_residual = np.dot(H[g], w_i) - Xy[g]
             else:
-                X_residual = np.dot(X.T, np.dot(X[:, g], w_i)) - Xy[g]
+                X_residual = np.dot(X[:, g].T, np.dot(X, w_i)) - Xy[g]
             qp = np.dot(eigvects.T, X_residual)
             if len(g) < 2:
                 # for single groups we know a closed form solution
                 w_new[g] = - np.sign(X_residual) * max(abs(X_residual) - alpha, 0)
             else:
                 if alpha < linalg.norm(X_residual, 2):
-                    initial_guess[i] = optimize.newton(f, initial_guess[i], df, tol=.5,
-                                args=(qp ** 2, eigvals, alpha))
+                    initial_guess[i] = optimize.newton(f, initial_guess[i], df, tol=1e-3,
+                                args=(qp ** 2, eigvals, alpha), maxiter=10 ** 5)
                     w_new[g] = - initial_guess[i] * np.dot(eigvects /  (eigvals * initial_guess[i] + alpha), qp)
                 else:
                     w_new[g] = 0.
@@ -97,7 +97,7 @@ def group_lasso(X, y, alpha, groups, max_iter=MAX_ITER, rtol=1e-6,
 
         # .. dual gap ..
         max_inc = linalg.norm(w_old - w_new, np.inf)
-        if True: #max_inc < rtol * np.amax(w_new):
+        if max_inc < rtol * np.amax(w_new):
             residual = np.dot(X, w_new) - y
             group_norm = alpha * np.sum([linalg.norm(w_new[g], 2)
                          for g in group_labels])
@@ -105,7 +105,8 @@ def group_lasso(X, y, alpha, groups, max_iter=MAX_ITER, rtol=1e-6,
                 norm_Anu = [linalg.norm(np.dot(H[g], w_new) - Xy[g]) \
                            for g in group_labels]
             else:
-                norm_Anu = [linalg.norm(np.dot(H[g], residual)) \
+                # TODO: Uses H !!!!
+                norm_Anu = [linalg.norm(np.dot(X[:, g].T, residual)) \
                            for g in group_labels]
             if np.any(norm_Anu > alpha):
                 nnu = residual * np.min(alpha / norm_Anu)
@@ -143,7 +144,6 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
     group_labels = [np.where(groups == i)[0] for i in np.unique(groups)]
     Xy = np.dot(X.T, y)
 
-#    import ipdb; ipdb.set_trace()
     for n_iter in range(max_iter):
         w_old = w_new.copy()
         for i, g in enumerate(group_labels):
@@ -166,15 +166,17 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
 
 
 
-def check_kkt(A, b, x, penalty, groups):
-    """Check KKT conditions for the group lasso
+def group_lasso_check_kkt(A, b, x, penalty, groups):
+    """Auxiliary function.
+    Check KKT conditions for the group lasso
 
     Returns True if conditions are satisfied, False otherwise
     """
+    from scipy import linalg
     group_labels = [groups == i for i in np.unique(groups)]
     penalty = penalty * A.shape[0]
     z = np.dot(A.T, np.dot(A, x) - b)
-    safety_net = 1e-1 # sort of tolerance
+    safety_net = .5 # sort of tolerance
     for g in group_labels:
         if linalg.norm(x[g]) == 0:
             if not linalg.norm(z[g]) < penalty + safety_net:
@@ -183,18 +185,30 @@ def check_kkt(A, b, x, penalty, groups):
             w = - penalty * x[g] / linalg.norm(x[g], 2)
             if not np.allclose(z[g], w, safety_net):
                 return False
-    return True
-
+            return True
 
 if __name__ == '__main__':
+    np.random.seed(0)
     from sklearn import datasets
     diabetes = datasets.load_diabetes()
     X = diabetes.data
     y = diabetes.target
     alpha = .1
     # groups = np.r_[[0, 0], np.arange(X.shape[1] - 2)]
-    groups = np.arange(X.shape[1])
-    coefs = sparse_group_lasso(X, y, alpha, 0, groups, verbose=True)
-    print 'KKT conditions verified:', check_kkt(X, y, coefs, alpha, groups)
+    groups = np.arange(X.shape[1]) // 2
+    coefs = group_lasso(X, y, alpha, groups, verbose=True)
+    print 'KKT conditions verified:', group_lasso_check_kkt(X, y, coefs, alpha, groups)
+
+    X = np.random.randn(100, 10)
+    y = np.random.randn(100)
+    groups = np.arange(X.shape[1]) // 3
+    coefs = group_lasso(X, y, alpha, groups, verbose=True)
+    print 'KKT conditions verified:', group_lasso_check_kkt(X, y, coefs, alpha, groups)
+
+    X = np.random.randn(10, 100)
+    y = np.random.randn(10)
+    groups = np.arange(X.shape[1]) // 3
+    coefs = group_lasso(X, y, alpha, groups, verbose=True)
+    print 'KKT conditions verified:', group_lasso_check_kkt(X, y, coefs, alpha, groups)
 
 
