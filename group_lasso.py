@@ -1,3 +1,5 @@
+
+import warnings
 import numpy as np
 from scipy import linalg, optimize
 
@@ -88,9 +90,15 @@ def group_lasso(X, y, alpha, groups, max_iter=MAX_ITER, rtol=1e-6,
                 w_new[g] = - np.sign(X_residual) * max(abs(X_residual) - alpha, 0)
             else:
                 if alpha < linalg.norm(X_residual, 2):
-                    initial_guess[i] = optimize.newton(f, initial_guess[i], df, tol=1e-3,
-                                args=(qp ** 2, eigvals, alpha), maxiter=newton_maxiter)
-                    w_new[g] = - initial_guess[i] * np.dot(eigvects /  (eigvals * initial_guess[i] + alpha), qp)
+                    try:
+                        # XXX works best initialized by zeros
+                        initial_guess[i] = 0.
+                        initial_guess[i] = optimize.newton(f, initial_guess[i], df, tol=1e-3,
+                                    args=(qp ** 2, eigvals, alpha), maxiter=newton_maxiter)
+                        w_new[g] = - initial_guess[i] * np.dot(eigvects /  (eigvals * initial_guess[i] + alpha), qp)
+                    except RuntimeError:
+                        warnings.warn('Newton did not converge')
+                        w_new[g] = 0.
                 else:
                     w_new[g] = 0.
 
