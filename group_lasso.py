@@ -36,7 +36,7 @@ def soft_threshold(a, b):
     """accepts vectors"""
     return np.sign(a) * np.fmax(np.abs(a) - b, 0)
 
-def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, step_size=.1, rtol=1e-6,
+def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
                 verbose=False):
     """
     .5 * ||Xb - y||^2_2 + n_samples * (alpha * (1 - rho) * sum(sqrt(#j) * ||b_j||_2) + alpha * rho ||b_j||_1)
@@ -77,9 +77,7 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, step_size=.1
 
     References
     ----------
-    "Efficient Block-coordinate Descent Algorithms for the Group Lasso",
-    Qin, Scheninberg, Goldfarb
-
+    "A sparse-group lasso", Noah Simon et al.
     """
     # .. local variables ..
     X, y, groups, alpha = map(np.asanyarray, (X, y, groups, alpha))
@@ -94,6 +92,7 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, step_size=.1
     Xy = np.dot(X.T, y)
 
     for n_iter in range(max_iter):
+        w_old = w_new.copy()
         for i, g in enumerate(group_labels):
             w_i = w_new.copy() # XXX
             w_i[g] = 0.
@@ -104,14 +103,35 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, step_size=.1
                 w_new[g] = 0.
             else:
                 # .. step 3 ..
-                stp = step_size
-                for _ in range(100):
-                    stp *= .8
-                    grad_l = np.dot(X[:, g].T, rk - np.dot(X[:, g], w_new[g])) # XXX update inplace
-                    tmp = soft_threshold(w_new[g] + step_size * grad_l, step_size * rho * alpha)
-                    w_new[g] = max(1 - step_size * (1 - rho) * alpha / np.linalg.norm(tmp), 0) * tmp
+                if False:
+                    stp = step_size = .01
+                    for _ in range(100):
+                        stp *= .8
+                        grad_l = np.dot(X[:, g].T, rk - np.dot(X[:, g], w_new[g])) # XXX update inplace
+                        tmp = soft_threshold(w_new[g] + step_size * grad_l, step_size * rho * alpha)
+                        w_new[g] = max(1 - step_size * (1 - rho) * alpha / np.linalg.norm(tmp), 0) * tmp
+                else:
+                    for l in range(10):
+                        step_size = 1.
+                        residual_k = rk - np.dot(X[:, g], w_new[g])
+                        loss = np.linalg.norm(residual_k)
+                        grad_l = np.dot(X[:, g].T, residual_k)
+
+                        while True:
+                            # optimize step size
+                            step_size *= .8
+                            tmp = soft_threshold(w_new[g] + step_size * grad_l, step_size * rho * alpha)
+                            U = max(1 - step_size * (1 - rho) * alpha / np.linalg.norm(tmp), 0) * tmp
+                            loss_U = np.linalg.norm(rk - np.dot(X[:, g], U))
+                            delta = U - w_new[g]
+                            #import ipdb; ipdb.set_trace()
+                            if loss_U < loss + np.dot(grad_l, delta) + np.dot(delta, delta) / (2. * step_size):
+                                break
+                        w_new[g] = U
                 assert np.isfinite(w_new[g]).all()
 
+        if np.linalg.norm(w_new - w_old) / np.linalg.norm(w_new) < rtol:
+            break
     return w_new
 
 
@@ -153,13 +173,13 @@ if __name__ == '__main__':
     X = np.random.randn(100, 10)
     y = np.random.randn(100)
     groups = np.arange(X.shape[1]) // 10
-    coefs = sparse_group_lasso(X, y, alpha, 0., groups, verbose=True, step_size=.01)
+    coefs = sparse_group_lasso(X, y, alpha, 0., groups, verbose=True)
     print('KKT conditions verified:', group_lasso_check_kkt(X, y, coefs, alpha, groups))
 
     X = np.random.randn(100, 1000)
     y = np.random.randn(100)
     groups = np.arange(X.shape[1]) // 100
-    coefs = sparse_group_lasso(X, y, alpha, 0., groups, verbose=True, step_size=.001)
+    coefs = sparse_group_lasso(X, y, alpha, 0., groups, verbose=True)
     print('KKT conditions verified:', group_lasso_check_kkt(X, y, coefs, alpha, groups))
 
 
