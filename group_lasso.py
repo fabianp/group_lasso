@@ -1,19 +1,52 @@
+#
+# Author: Fabian Pedregosa <fabian@fseoane.net>
+# License: BSD
 
-import warnings
 import numpy as np
-from scipy import linalg, optimize
+
+
+## .. dual gap ..
+#max_inc = linalg.norm(w_old - w_new, np.inf)
+#if max_inc < rtol * np.amax(w_new):
+#    residual = np.dot(X, w_new) - y
+#    group_norm = alpha * np.sum([linalg.norm(w_new[g], 2)
+#                                 for g in group_labels])
+#    if H is not None:
+#        norm_Anu = [linalg.norm(np.dot(H[g], w_new) - Xy[g])\
+#                    for g in group_labels]
+#    else:
+#        # TODO: Uses H !!!!
+#        norm_Anu = [linalg.norm(np.dot(X[:, g].T, residual))\
+#                    for g in group_labels]
+#    if np.any(norm_Anu > alpha):
+#        nnu = residual * np.min(alpha / norm_Anu)
+#    else:
+#        nnu = residual
+#    primal_obj =  .5 * np.dot(residual, residual) + group_norm
+#    dual_obj   = -.5 * np.dot(nnu, nnu) - np.dot(nnu, y)
+#    dual_gap = primal_obj - dual_obj
+#    if verbose:
+#        print 'Relative error: %s' % (dual_gap / dual_obj)
+#    if np.abs(dual_gap / dual_obj) < rtol:
+#        break
 
 MAX_ITER = 100
 
+def soft_threshold(a, b):
+    """accepts vectors"""
+    return np.sign(a) * np.fmax(np.abs(a) - b, 0)
 
-def group_lasso(X, y, alpha, groups, max_iter=MAX_ITER, rtol=1e-6,
-             verbose=False, newton_maxiter=10 ** 4):
+def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, step_size=.1, rtol=1e-6,
+                verbose=False):
     """
+    .5 * ||Xb - y||^2_2 + n_samples * (alpha * (1 - rho) * sum(sqrt(#j) * ||b_j||_2) + alpha * rho ||b_j||_1)
+
+
     Linear least-squares with l2/l1 regularization solver.
 
     Solves problem of the form:
 
-               .5 * |Xb - y| + n_samples * alpha * Sum(w_j * |b_j|)
+    .5 * |Xb - y| + n_samples * alpha * Sum(w_j * |b_j|)
 
     where |.| is the l2-norm and b_j is the coefficients of b in the
     j-th group. This is commonly known as the `group lasso`.
@@ -21,155 +54,64 @@ def group_lasso(X, y, alpha, groups, max_iter=MAX_ITER, rtol=1e-6,
     Parameters
     ----------
     X : array of shape (n_samples, n_features)
-        Design Matrix.
+    Design Matrix.
 
     y : array of shape (n_samples,)
 
     alpha : float or array
-        Amount of penalization to use.
+    Amount of penalization to use.
 
     groups : array of shape (n_features,)
-        Group label. For each column, it indicates
-        its group apertenance.
+    Group label. For each column, it indicates
+    its group apertenance.
 
     rtol : float
-        Relative tolerance. ensures ||(x - x_) / x_|| < rtol,
-        where x_ is the approximate solution and x is the
-        true solution.
+    Relative tolerance. ensures ||(x - x_) / x_|| < rtol,
+    where x_ is the approximate solution and x is the
+    true solution.
 
     Returns
     -------
     x : array
-        vector of coefficients
+    vector of coefficients
 
     References
     ----------
     "Efficient Block-coordinate Descent Algorithms for the Group Lasso",
     Qin, Scheninberg, Goldfarb
-    """
 
-    # .. local variables ..
-    X, y, groups, alpha = map(np.asanyarray, (X, y, groups, alpha))
-    if len(groups) != X.shape[1]:
-        raise ValueError("Incorrect shape for groups")
-    w_new = np.zeros(X.shape[1], dtype=X.dtype)
-    alpha = alpha * X.shape[0]
-
-    # .. use integer indices for groups ..
-    group_labels = [np.where(groups == i)[0] for i in np.unique(groups)]
-    H_groups = [np.dot(X[:, g].T, X[:, g]) for g in group_labels]
-    eig = map(linalg.eigh, H_groups)
-    Xy = np.dot(X.T, y)
-    initial_guess = np.zeros(len(group_labels))
-
-    def f(x, qp2, eigvals, alpha):
-        return 1 - np.sum( qp2 / ((x * eigvals + alpha) ** 2))
-    def df(x, qp2, eigvals, penalty):
-        # .. first derivative ..
-        return np.sum((2 * qp2 * eigvals) / ((penalty + x * eigvals) ** 3))
-
-    if X.shape[0] > X.shape[1]:
-        H = np.dot(X.T, X)
-    else:
-        H = None
-
-    for n_iter in range(max_iter):
-        w_old = w_new.copy()
-        for i, g in enumerate(group_labels):
-            # .. shrinkage operator ..
-            eigvals, eigvects = eig[i]
-            w_i = w_new.copy()
-            w_i[g] = 0.
-            if H is not None:
-                X_residual = np.dot(H[g], w_i) - Xy[g]
-            else:
-                X_residual = np.dot(X[:, g].T, np.dot(X, w_i)) - Xy[g]
-            qp = np.dot(eigvects.T, X_residual)
-            if len(g) < 2:
-                # for single groups we know a closed form solution
-                w_new[g] = - np.sign(X_residual) * max(abs(X_residual) - alpha, 0)
-            else:
-                if alpha < linalg.norm(X_residual, 2):
-                    try:
-                        # XXX works best initialized by zeros
-                        initial_guess[i] = 0.
-                        initial_guess[i] = optimize.newton(f, initial_guess[i], df, tol=1e-3,
-                                    args=(qp ** 2, eigvals, alpha), maxiter=newton_maxiter)
-                        w_new[g] = - initial_guess[i] * np.dot(eigvects /  (eigvals * initial_guess[i] + alpha), qp)
-                    except RuntimeError:
-                        warnings.warn('Newton did not converge')
-                        w_new[g] = 0.
-                else:
-                    w_new[g] = 0.
-
-
-        # .. dual gap ..
-        max_inc = linalg.norm(w_old - w_new, np.inf)
-        if max_inc < rtol * np.amax(w_new):
-            residual = np.dot(X, w_new) - y
-            group_norm = alpha * np.sum([linalg.norm(w_new[g], 2)
-                         for g in group_labels])
-            if H is not None:
-                norm_Anu = [linalg.norm(np.dot(H[g], w_new) - Xy[g]) \
-                           for g in group_labels]
-            else:
-                # TODO: Uses H !!!!
-                norm_Anu = [linalg.norm(np.dot(X[:, g].T, residual)) \
-                           for g in group_labels]
-            if np.any(norm_Anu > alpha):
-                nnu = residual * np.min(alpha / norm_Anu)
-            else:
-                nnu = residual
-            primal_obj =  .5 * np.dot(residual, residual) + group_norm
-            dual_obj   = -.5 * np.dot(nnu, nnu) - np.dot(nnu, y)
-            dual_gap = primal_obj - dual_obj
-            if verbose:
-                print 'Relative error: %s' % (dual_gap / dual_obj)
-            if np.abs(dual_gap / dual_obj) < rtol:
-                break
-
-    return w_new
-
-
-def soft_threshold(a, b):
-    """accepts vectors"""
-    return np.sign(a) * np.fmax(np.abs(a) - b, 0)
-
-def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
-                verbose=False):
-    """
-    .5 * ||Xb - y||^2_2 + n_samples * (alpha * (1 - rho) * sum(sqrt(#j) * ||b_j||_2) + alpha * rho ||b_j||_1)
     """
     # .. local variables ..
     X, y, groups, alpha = map(np.asanyarray, (X, y, groups, alpha))
-    if len(groups) != X.shape[1]:
-        raise ValueError("Incorrect shape for groups")
+    if groups.shape[0] != X.shape[1]:
+        raise ValueError('Groups should be of shape %s got %s instead' % ((X.shape[1],), groups.shape))
     w_new = np.zeros(X.shape[1], dtype=X.dtype)
-    alpha = alpha * X.shape[0]
     n_samples = X.shape[0]
+    alpha = alpha * n_samples
 
     # .. use integer indices for groups ..
     group_labels = [np.where(groups == i)[0] for i in np.unique(groups)]
     Xy = np.dot(X.T, y)
 
     for n_iter in range(max_iter):
-        w_old = w_new.copy()
         for i, g in enumerate(group_labels):
-            w_i = w_new.copy()
+            w_i = w_new.copy() # XXX
             w_i[g] = 0.
-            X_residual = Xy[g] - np.dot(X[:, g].T, np.dot(X, w_i))
-            s = soft_threshold(X_residual, alpha * rho)
+            rk = y - np.dot(X, w_i)
+            s = soft_threshold(np.dot(X[:, g].T, rk), alpha * rho) # XXX: update inplace    #X_residual = np.dot(X[:, g].T, np.dot(X, w_i)) - Xy[g] # X^t(y - X w)
             # .. step 2 ..
             if np.linalg.norm(s) <= (1 - rho) * alpha:
                 w_new[g] = 0.
             else:
-#                w_new[g] = soft_threshold(X_residual, alpha)
                 # .. step 3 ..
-                for _ in range(10):
-                    step = 1.
-                    tmp = soft_threshold(w_new[g] + step * X_residual, step * alpha * rho)
-                    w_new[g] = max(1 - step * (1 - rho) * alpha / np.linalg.norm(tmp), 0) * tmp
-                print w_new[g]
+                stp = step_size
+                for _ in range(100):
+                    stp *= .8
+                    grad_l = np.dot(X[:, g].T, rk - np.dot(X[:, g], w_new[g])) # XXX update inplace
+                    tmp = soft_threshold(w_new[g] + step_size * grad_l, step_size * rho * alpha)
+                    w_new[g] = max(1 - step_size * (1 - rho) * alpha / np.linalg.norm(tmp), 0) * tmp
+                assert np.isfinite(w_new[g]).all()
+
     return w_new
 
 
@@ -195,28 +137,29 @@ def group_lasso_check_kkt(A, b, x, penalty, groups):
                 return False
             return True
 
+
 if __name__ == '__main__':
     np.random.seed(0)
+    alpha = .1
+
     from sklearn import datasets
     diabetes = datasets.load_diabetes()
     X = diabetes.data
     y = diabetes.target
-    alpha = .1
-    # groups = np.r_[[0, 0], np.arange(X.shape[1] - 2)]
-    groups = np.arange(X.shape[1]) // 2
-    coefs = group_lasso(X, y, alpha, groups, verbose=True)
-    print 'KKT conditions verified:', group_lasso_check_kkt(X, y, coefs, alpha, groups)
+    groups = np.arange(X.shape[1]) // 5
+    coefs = sparse_group_lasso(X, y, alpha, 0., groups, verbose=True)
+    print('KKT conditions verified:', group_lasso_check_kkt(X, y, coefs, alpha, groups))
 
     X = np.random.randn(100, 10)
     y = np.random.randn(100)
-    groups = np.arange(X.shape[1]) // 3
-    coefs = group_lasso(X, y, alpha, groups, verbose=True)
-    print 'KKT conditions verified:', group_lasso_check_kkt(X, y, coefs, alpha, groups)
+    groups = np.arange(X.shape[1]) // 10
+    coefs = sparse_group_lasso(X, y, alpha, 0., groups, verbose=True, step_size=.01)
+    print('KKT conditions verified:', group_lasso_check_kkt(X, y, coefs, alpha, groups))
 
-    X = np.random.randn(10, 100)
-    y = np.random.randn(10)
-    groups = np.arange(X.shape[1]) // 3
-    coefs = group_lasso(X, y, alpha, groups, verbose=True)
-    print 'KKT conditions verified:', group_lasso_check_kkt(X, y, coefs, alpha, groups)
+    X = np.random.randn(100, 1000)
+    y = np.random.randn(100)
+    groups = np.arange(X.shape[1]) // 100
+    coefs = sparse_group_lasso(X, y, alpha, 0., groups, verbose=True, step_size=.001)
+    print('KKT conditions verified:', group_lasso_check_kkt(X, y, coefs, alpha, groups))
 
 
