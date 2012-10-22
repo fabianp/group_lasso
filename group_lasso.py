@@ -16,7 +16,7 @@ def soft_threshold(a, b):
 def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
                 verbose=False):
     """
-    Linear least-squares with l2/l1 regularization solver.
+    Linear least-squares with l2/l1 + l1 regularization solver.
 
     Solves problem of the form:
 
@@ -24,7 +24,7 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
         [ (alpha * (1 - rho) * sum(sqrt(#j) * ||b_j||_2) + alpha * rho ||b_j||_1) ]
 
     where b_j is the coefficients of b in the
-    j-th group. Also known as the `group lasso`.
+    j-th group. Also known as the `sparse group lasso`.
 
     Parameters
     ----------
