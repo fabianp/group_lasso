@@ -1,7 +1,7 @@
 #
 # Author: Fabian Pedregosa <fabian@fseoane.net>
 # License: BSD
-
+import math
 import numpy as np
 from scipy import linalg
 
@@ -67,33 +67,38 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
     Xy = np.dot(X.T, y)
     K = np.dot(X.T, X)
     step_size = 1. / (linalg.norm(X, 2) ** 2)
-    _K = [K[g][:, g] for g in group_labels]
+    _K = [K[group][:, group] for group in group_labels]
 
     for n_iter in range(max_iter):
         w_old = w_new.copy()
         perm = np.random.permutation(len(group_labels))
         X_residual = Xy - np.dot(K, w_new) # could be updated, but kernprof says it's peanuts
         for i in perm:
-            g = group_labels[i]
+            group = group_labels[i]
+            #import ipdb; ipdb.set_trace()
+            p_j = math.sqrt(group.size)
             Kgg = _K[i]
-            X_r_k = X_residual[g] + np.dot(Kgg, w_new[g])
+            X_r_k = X_residual[group] + np.dot(Kgg, w_new[group])
             s = soft_threshold(X_r_k, alpha * rho)
             # .. step 2 ..
-            if np.linalg.norm(s) <= (1 - rho) * alpha:
-                w_new[g] = 0.
+            if np.linalg.norm(s) <= (1 - rho) * alpha * p_j:
+                w_new[group] = 0.
             else:
                 # .. step 3 ..
-                for _ in range(2 * g.size): # just a heuristic
-                    grad_l =  - (X_r_k - np.dot(Kgg, w_new[g]))
-                    tmp = soft_threshold(w_new[g] - step_size * grad_l, step_size * rho * alpha)
-                    tmp *= max(1 - step_size * (1 - rho) * alpha / np.linalg.norm(tmp), 0)
-                    delta = linalg.norm(tmp - w_new[g])
-                    w_new[g] = tmp
+                for _ in range(2 * group.size): # just a heuristic
+                    grad_l =  - (X_r_k - np.dot(Kgg, w_new[group]))
+                    tmp = soft_threshold(w_new[group] - step_size * grad_l, step_size * rho * alpha)
+                    tmp *= max(1 - step_size * p_j * (1 - rho) * alpha / np.linalg.norm(tmp), 0)
+                    delta = linalg.norm(tmp - w_new[group])
+                    w_new[group] = tmp
                     if delta < 1e-3:
                         break
 
-                assert np.isfinite(w_new[g]).all()
-        if np.linalg.norm(w_new - w_old) / np.linalg.norm(w_new) < rtol:
+                assert np.isfinite(w_new[group]).all()
+
+        norm_w_new = max(np.linalg.norm(w_new), 1e-10)
+        if np.linalg.norm(w_new - w_old) / norm_w_new < rtol:
+            #import ipdb; ipdb.set_trace()
             break
     return w_new
 
@@ -111,19 +116,21 @@ def group_lasso_check_kkt(A, b, x, alpha, groups):
     z = np.dot(A.T, np.dot(A, x) - b)
     safety_net = .1 # sort of tolerance
     for g in group_labels:
+        alpha_g = alpha * np.sqrt(np.sum(g))
         if linalg.norm(x[g]) == 0:
-            if not linalg.norm(z[g]) < alpha + safety_net:
+            if not linalg.norm(z[g]) < alpha_g + safety_net:
                 return False
         else:
-            w = - alpha * x[g] / linalg.norm(x[g], 2)
+            w = - alpha_g * x[g] / linalg.norm(x[g], 2)
             if not np.allclose(z[g], w, safety_net):
                 return False
             return True
+    return True # all zeros
 
 
 if __name__ == '__main__':
     np.random.seed(0)
-    alpha = .1
+    alpha = 0.1
 
     from sklearn import datasets
     diabetes = datasets.load_diabetes()
