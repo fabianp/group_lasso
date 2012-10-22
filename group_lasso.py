@@ -20,7 +20,8 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
 
     Solves problem of the form:
 
-    .5 * ||Xb - y||^2_2 + n_samples * (alpha * (1 - rho) * sum(sqrt(#j) * ||b_j||_2) + alpha * rho ||b_j||_1)
+    (1 / (2 n_samples)) * ||Xb - y||^2_2 +
+        [ (alpha * (1 - rho) * sum(sqrt(#j) * ||b_j||_2) + alpha * rho ||b_j||_1) ]
 
     where b_j is the coefficients of b in the
     j-th group. Also known as the `group lasso`.
