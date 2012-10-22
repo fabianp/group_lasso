@@ -1,8 +1,9 @@
 #
 # Author: Fabian Pedregosa <fabian@fseoane.net>
 # License: BSD
-
+import random
 import numpy as np
+from scipy import linalg
 
 
 ## .. dual gap ..
@@ -30,50 +31,48 @@ import numpy as np
 #    if np.abs(dual_gap / dual_obj) < rtol:
 #        break
 
-MAX_ITER = 100
+MAX_ITER = 1000
 
 def soft_threshold(a, b):
     """accepts vectors"""
     return np.sign(a) * np.fmax(np.abs(a) - b, 0)
 
+#@profile
 def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
                 verbose=False):
     """
-    .5 * ||Xb - y||^2_2 + n_samples * (alpha * (1 - rho) * sum(sqrt(#j) * ||b_j||_2) + alpha * rho ||b_j||_1)
-
-
     Linear least-squares with l2/l1 regularization solver.
 
     Solves problem of the form:
 
-    .5 * |Xb - y| + n_samples * alpha * Sum(w_j * |b_j|)
+    .5 * ||Xb - y||^2_2 + n_samples * (alpha * (1 - rho) * sum(sqrt(#j) * ||b_j||_2) + alpha * rho ||b_j||_1)
 
-    where |.| is the l2-norm and b_j is the coefficients of b in the
-    j-th group. This is commonly known as the `group lasso`.
+    where b_j is the coefficients of b in the
+    j-th group. Also known as the `group lasso`.
 
     Parameters
     ----------
     X : array of shape (n_samples, n_features)
-    Design Matrix.
+        Design Matrix.
 
     y : array of shape (n_samples,)
 
     alpha : float or array
-    Amount of penalization to use.
+        Amount of penalization to use.
 
     groups : array of shape (n_features,)
-    Group label. For each column, it indicates
-    its group apertenance.
+        Group label. For each column, it indicates
+        its group apertenance.
 
     rtol : float
-    Relative tolerance. ensures ||(x - x_) / x_|| < rtol,
-    where x_ is the approximate solution and x is the
-    true solution.
+        Relative tolerance. ensures ||(x - x_) / x_|| < rtol,
+        where x_ is the approximate solution and x is the
+        true solution. TODO duality gap
 
     Returns
     -------
     x : array
-    vector of coefficients
+        vector of coefficients
 
     References
     ----------
@@ -90,44 +89,33 @@ def sparse_group_lasso(X, y, alpha, rho, groups, max_iter=MAX_ITER, rtol=1e-6,
     # .. use integer indices for groups ..
     group_labels = [np.where(groups == i)[0] for i in np.unique(groups)]
     Xy = np.dot(X.T, y)
+    K = np.dot(X.T, X)
+    step_size = 1. / (linalg.norm(X, 2) ** 2)
 
     for n_iter in range(max_iter):
         w_old = w_new.copy()
+        random.shuffle(group_labels)
         for i, g in enumerate(group_labels):
-            w_i = w_new.copy() # XXX
-            w_i[g] = 0.
-            rk = y - np.dot(X, w_i)
-            s = soft_threshold(np.dot(X[:, g].T, rk), alpha * rho) # XXX: update inplace    #X_residual = np.dot(X[:, g].T, np.dot(X, w_i)) - Xy[g] # X^t(y - X w)
+            w_tmp = w_new.copy()
+            w_tmp[g] = 0.
+            Kg = K[g]
+            X_residual = Xy[g] - np.dot(Kg, w_tmp)
+            residual = y - np.dot(X, w_tmp)
+            s = soft_threshold(X_residual, alpha * rho)
             # .. step 2 ..
             if np.linalg.norm(s) <= (1 - rho) * alpha:
                 w_new[g] = 0.
             else:
                 # .. step 3 ..
-                if False:
-                    stp = step_size = .01
-                    for _ in range(100):
-                        stp *= .8
-                        grad_l = np.dot(X[:, g].T, rk - np.dot(X[:, g], w_new[g])) # XXX update inplace
-                        tmp = soft_threshold(w_new[g] + step_size * grad_l, step_size * rho * alpha)
-                        w_new[g] = max(1 - step_size * (1 - rho) * alpha / np.linalg.norm(tmp), 0) * tmp
-                else:
-                    for l in range(10):
-                        step_size = 1.
-                        residual_k = rk - np.dot(X[:, g], w_new[g])
-                        loss = np.linalg.norm(residual_k)
-                        grad_l = np.dot(X[:, g].T, residual_k)
+                for _ in range(3 * g.size): # just a heuristic
+                    grad_l =  - (X_residual - np.dot(Kg[:, g], w_new[g]))
+                    tmp = soft_threshold(w_new[g] - step_size * grad_l, step_size * rho * alpha)
+                    tmp *= max(1 - step_size * (1 - rho) * alpha / np.linalg.norm(tmp), 0)
+                    delta = linalg.norm(tmp - w_new[g])
+                    w_new[g] = tmp
+                    if delta < 1e-3:
+                        break
 
-                        while True:
-                            # optimize step size
-                            step_size *= .8
-                            tmp = soft_threshold(w_new[g] + step_size * grad_l, step_size * rho * alpha)
-                            U = max(1 - step_size * (1 - rho) * alpha / np.linalg.norm(tmp), 0) * tmp
-                            loss_U = np.linalg.norm(rk - np.dot(X[:, g], U))
-                            delta = U - w_new[g]
-                            #import ipdb; ipdb.set_trace()
-                            if loss_U < loss + np.dot(grad_l, delta) + np.dot(delta, delta) / (2. * step_size):
-                                break
-                        w_new[g] = U
                 assert np.isfinite(w_new[g]).all()
 
         if np.linalg.norm(w_new - w_old) / np.linalg.norm(w_new) < rtol:
