@@ -9,7 +9,7 @@ from scipy import linalg
 MAX_ITER = 1000
 
 def soft_threshold(a, b):
-    """accepts vectors"""
+    # vectorized version
     return np.sign(a) * np.fmax(np.abs(a) - b, 0)
 
 
